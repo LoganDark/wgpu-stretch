@@ -122,6 +122,38 @@ fn main() {
 
 	window.request_redraw();
 
+	let redraw = |swapchain: &mut wgpu::SwapChain, device: &wgpu::Device, logical_size: LogicalSize<f64>| {
+		let frame = swapchain.get_current_frame().unwrap();
+
+		let mut encoder = device.create_command_encoder(&enc_desc);
+
+		{
+			let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+				color_attachments: &[
+					wgpu::RenderPassColorAttachmentDescriptor {
+						attachment: &frame.output.view,
+						resolve_target: None,
+						ops: wgpu::Operations {
+							load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+							store: true
+						}
+					}
+				],
+				depth_stencil_attachment: None
+			});
+
+			render_pass.set_pipeline(&pipeline);
+			render_pass.set_bind_group(0, &bind_group, &[]);
+			render_pass.draw(0..4, 0..1);
+		}
+
+		queue.write_buffer(&buffer, 0, bytemuck::bytes_of(&[
+			logical_size.width as f32, logical_size.height as f32
+		]));
+
+		queue.submit(std::iter::once(encoder.finish()));
+	};
+
 	event_loop.run_return(move |event, _, flow| {
 		*flow = ControlFlow::Wait;
 
@@ -137,45 +169,17 @@ fn main() {
 					sc_desc.width = new_size.width;
 					sc_desc.height = new_size.height;
 					swapchain = device.create_swap_chain(&surface, &sc_desc);
-					window.request_redraw();
+					redraw(&mut swapchain, &device, new_size.to_logical(window.scale_factor()));
 				}
 
 				_ => {}
 			}
 
 			Event::RedrawRequested(id) if id == window.id() => {
-				let frame = swapchain.get_current_frame().unwrap();
-
-				let mut encoder = device.create_command_encoder(&enc_desc);
-
-				{
-					let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-						color_attachments: &[
-							wgpu::RenderPassColorAttachmentDescriptor {
-								attachment: &frame.output.view,
-								resolve_target: None,
-								ops: wgpu::Operations {
-									load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-									store: true
-								}
-							}
-						],
-						depth_stencil_attachment: None
-					});
-
-					render_pass.set_pipeline(&pipeline);
-					render_pass.set_bind_group(0, &bind_group, &[]);
-					render_pass.draw(0..4, 0..1);
-				}
-
-				let logical_size: LogicalSize<f64> = PhysicalSize::new(sc_desc.width, sc_desc.height)
+				let window_size = PhysicalSize::new(sc_desc.width, sc_desc.height)
 					.to_logical(window.scale_factor());
 
-				queue.write_buffer(&buffer, 0, bytemuck::bytes_of(&[
-					logical_size.width as f32, logical_size.height as f32
-				]));
-
-				queue.submit(std::iter::once(encoder.finish()));
+				redraw(&mut swapchain, &device, window_size);
 			}
 
 			_ => {}
